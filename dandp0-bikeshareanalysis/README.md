@@ -1,4 +1,4 @@
-Analyze Bay Area Bike Share Data
+## Analyze Bay Area Bike Share Data
 
 This project will introduce you to the key steps of the data analysis process. You will do so by analyzing data from a bike share company found in the San Francisco Bay area. You will submit this project in your first 7 days, and by the end you will be able to:
 
