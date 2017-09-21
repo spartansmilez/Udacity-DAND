@@ -1,0 +1,795 @@
+
+Sirron Melville
+
+Analysis of the 2016 Presidential Campaign Financial Contributions in Massachusetts
+========================================================
+
+
+# Introduction 
+
+This report will be an exploratory data analysis of the financial contributions made to the 2016 Presidential Campaign in the state of Massachusetts. The data set being examined is provided by the Federal Election Commission and contains the financial contributions o the campaign from April 18th 2015 to November 24th 2016.  
+
+The following questions will be answered by the analysis:
+
+* Which one of the candidates received the most contributions and how much?
+* Which candidate had the most supporters?
+* Who are the contributors and what is their occupation? 
+* Are there any patterns with respect to donation methods?
+* Did men or women donate more money to Hillary Clinton?
+* Can you predict the party of a contributor based on their characteristics?
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(gender)
+library(ggplot2)
+library(ggmap)
+library(gridExtra)
+library(dplyr)
+library(lubridate)
+library(zipcode)
+library(aod)
+```
+
+# Univariate Plots Section
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+ma <- read.csv('ma_contribution.csv', row.names = NULL, stringsAsFactors = F)
+ma$X <- NULL
+dim(ma)
+str(ma)
+
+```
+
+In this dataset, there are 295667 contributions and 18 variables. Below is a visualization of the distribution of contributions. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+p1 <- ggplot(aes(x = contb_receipt_amt), data = ma) +
+  geom_histogram(bins = 50)
+p2 <- ggplot(aes(x = 1, y = contb_receipt_amt), data = ma) +
+  geom_boxplot()
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+From this, I noticed that there was a lot of outliers in the data and that in order to accurately answer questions, better visualizations had to be created.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+ggplot(aes(x = contb_receipt_amt), data = ma) +
+  geom_histogram(binwidth = 0.05) + 
+  scale_x_log10() +
+  ggtitle('Histogram of the Contribution')
+
+tail(sort(table(ma$contb_receipt_amt)), 5)
+summary(ma$contb_receipt_amt)
+
+```
+
+The data was scaled logarithmically in order to better represent the distribution of the contributions. The distribution above is relatively gaussian and the data indicates that the contributions of most of the donors were on the low side. 
+
+A summary of the data shows that the most frequent amount donated is $25 followed by $50 and $100. The minimum and maximum donations were -$84240 and maximum respectively.  
+
+Individuals are only permitted to donate up to $2700 to a candidate due to the contribution limit set by the FEC(Federal Election Commission). For the analysis, I ommited the negative contributions and the contributions above $2700 as these were probably refunds and redesignations. 5897 contributions are either negative or redesignated contributions.
+
+```{r}
+sum(ma$contb_receipt_amt >= 2700)
+sum(ma$contb_receipt_amt < 0)
+```
+
+More variables need to be created for the analysis. These are donors' gender, donors' zip code and party affiliation of the candidate.
+
+```{r echo=FALSE, data_process}
+# create variables for the parties.
+democrat <- c("Clinton, Hillary Rodham", "Sanders, Bernard", "O'Malley, Martin Joseph", "Lessig, Lawrence", "Webb, James Henry Jr.")
+ma$party <- ifelse(ma$cand_nm %in% democrat, "democrat", "republican")
+ma$party[ma$cand_nm %in% c("Johnson, Gary", "McMullin, Evan", "Stein, Jill")] <- 'others'
+
+# Get contributor's first name for gender prediction
+ma$contbr_first_nm <- sub(" .*", "", sub(".*, ", "", ma$contbr_nm))
+
+# Omit negative contributions and contributions >=2700
+ma <- ma[ma$contb_receipt_amt > 0 & ma$contb_receipt_amt <= 2700, ]
+
+# Format date
+ma$contb_receipt_dt <- as.Date(ma$contb_receipt_dt,format = "%d-%b-%y")
+
+# Create gender dataframe
+gender_df <- gender(ma$contbr_first_nm, method = 'ssa', c(1920, 1997),
+                       countries = 'United States')
+
+# create gender variable
+gender_df <- unique(gender_df)
+names(gender_df)[1] <- 'contbr_first_nm'
+ma <- inner_join(ma, gender_df, by = 'contbr_first_nm')
+
+# removal of columns that aren't needed
+drops <- c('proportion_male', 'proportion_female', 'year_min', 'year_max')
+ma <- ma[ , !(names(ma) %in% drops)]
+
+# Clean up zipcode and add missing leading zero on zipcode 
+ma$zip <- paste0("0", ma$contbr_zip)
+ma$zip <- substr(ma$zip, 1, 5)
+data(zipcode)
+ma <- left_join(ma, zipcode, by = 'zip')
+
+```
+
+The 5 variables that have been created are listed below and 5897 contributions were removed due to them either being negative, refunded or redesignated.
+
+Created variables:
+
+* party: party affilliation of candidate.
+* contbr_first_nm: the first name of the contributor will be used to predict gender.
+* gender: contributor's gender.
+* Latitude: Donor's latitude to be rendered on a map. 
+* Longitute: Donor's longitude to be rendered on a map.
+
+With added variables, I can look at the distribution of contributions by candidate, gender, party, and occuption.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Create party dataframe and bar graphs for the party
+party_group <- group_by(ma, party)
+ma.contr_by_party <- summarize(party_group,
+                               sum_party = sum(contb_receipt_amt),
+                               number_of_candidate = length(unique(cand_id)), 
+                               mean_party = sum_party/number_of_candidate, 
+                               n = n()) 
+                              
+ma.contr_by_party
+ma.contr_by_party$party <- ordered(ma.contr_by_party$party, 
+                                   levels = c('democrat', 'republican', 'others'))
+
+ggplot(aes(x = party, y = n, fill = party), data = ma.contr_by_party) +
+  geom_bar(stat = 'identity') +
+  geom_text(stat = 'identity', aes(label = n),
+            data = ma.contr_by_party, vjust = -0.4) +
+  xlab('Party') +
+  ylab('Number of Contributions') +
+  ggtitle('Total Number of Contributions by Party') +
+  scale_fill_manual(values = c('blue', 'red', 'burlywood'))
+
+sum(ma.contr_by_party$n)
+
+```
+
+Based on the dataset, the total number of donations made to the presidential election is 268,895, the Democratic party received 243,358 donations which is approximately 10 times more than the Republican party(24556 donations). 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+table(ma$cand_nm)
+
+ggplot(aes(x = cand_nm), data = ma) + geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab('candidate') +
+  ylab('Number of Contributions') +
+  ggtitle('Number of Contributions by Candidate')
+
+```
+
+Hillary Clinton led the 25 candidates in the number of contributions with almost 150,000 donations, Bernard Sanders and Donald Trump were second and third respectively.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+gender_group <- group_by(ma, gender)
+ma.contr_by_gen <- summarize(gender_group, 
+                             sum_gen = sum(contb_receipt_amt),
+                             n_gen = n())
+ma.contr_by_gen
+
+ggplot(aes(x = gender, y = n_gen, fill = gender), 
+       data = ma.contr_by_gen, vjust = -0.4) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label = n_gen), stat = 'identity', data = ma.contr_by_gen, vjust = -0.4) +
+  xlab('Gender') +
+  ylab('Number of Contributions') +
+  ggtitle('Number of Contributions by Gender')
+```
+
+Women made up about 56% of the donations. Further analysis may help us determine if Hillary Clinton was the reason for this.
+
+Who are those contributors?
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Create an occupation datadrame and occupation plots
+occupation_group <- group_by(ma, contbr_occupation)
+ma.contr_by_occu <- summarize(occupation_group, 
+                              sum_occu = sum(contb_receipt_amt), 
+                              mean_occu = mean(contb_receipt_amt), 
+                              n = n())
+ma.contr_by_occu <- subset(ma.contr_by_occu, contbr_occupation != "INFORMATION REQUESTED")
+ma.contr_by_occu <- head(arrange(ma.contr_by_occu,desc(n)), n = 10)
+ma.contr_by_occu$contbr_occupation <- ordered(ma.contr_by_occu$contbr_occupation, levels = c('RETIRED', 'NOT EMPLOYED', 'TEACHER', 'ATTORNEY', 'PROFESSOR', 'PHYSICIAN', 'CONSULTANT', 'SOFTWARE ENGINEER', 'HOMEMAKER', 'ENGINEER'))
+
+ma.contr_by_occu
+
+ggplot(aes(x = contbr_occupation, y = n), data = ma.contr_by_occu) +
+  geom_bar(stat = 'identity') +
+  xlab('Top 10 Occupations') +
+  ylab('Number of Donors') +
+  ggtitle('Top 10 Occupations by Number of Contributors') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+It seems that the top 3 occupations of contributors are retirees, people that are not employed and teachers. Homemakers and engineers round out the top ten. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+summary(ma$contb_receipt_dt)
+
+ggplot(aes(x = contb_receipt_dt), data = ma) + geom_histogram(binwidth = 30, position = position_dodge()) +
+  xlab('Date') +
+  ylab('Number of Contributions') +
+  ggtitle('Histogram of Contribution Date')
+
+```
+
+The above distribution of the date of contribution is somewhat bimodal showing that most of the contributions were around March/April 2016 and close to the election.
+
+# Univariate Analysis
+
+### What is the structure of your dataset?
+
+The dataset contains 268895 contributions and 18 variables. The variables that will be used in the analysis are:
+
+* cand_nm: Candidate Name
+* contbr_zip: Contributor ZIP Code
+* contbr_nm: Contributor name (first name will be used in gender prediction)
+* contbr_occupation: Contributor Occupation
+* contb_receipt_amt: Amount of Contribution 
+* contb_receipt_dt: Date of Contribution 
+
+Other observations:
+
+* Most of the donations are small.
+* The median donation amount is $28.
+* Most of the donations went to the democratic party. 
+* Hillary Clinton received most of the donations.
+* 56% of the donations were made by women.
+* Retirees donated the most. 
+
+### What is/are the main features of interest in your dataset?
+
+The main features of interest in the dataset are candidate, contribution amount and party. Analysis using these variables will help answer the aforementioned questions. A combination of variables can also be used to build a logistics regression model to predict the party a donor contributed to.
+
+### What other features in the dataset do you think will help support your investigation into your feature(s) of interest?
+
+The party that receives the contribution and contribution amount can be affected by gender, location, occupation and time of the contribution. The average contribution amount may be influenced by occupation and gender may play a role in the party that receives the contribution.
+
+### Did you create any new variables from existing variables in the dataset?
+
+5 variables were created:
+
+* party: party affilliation of candidate.
+* contbr_first_nm: the first name of the contributor will be used to predict gender.
+* gender: contributor's gender.
+* Latitude: Donor's latitude to be rendered on a map. 
+* Longitute: Donor's longitude to be rendered on a map.
+
+### Of the features you investigated, were there any unusual distributions? Did you perform any operations on the data to tidy, adjust, or change the form of the data? If so, why did you do this?
+
+The negative contributions and contributions over $2700 were omitted because of the contribution limit set by the FEC which prohibits donors from giving more than $2700. These contributions were either refunded or redesignated.  
+
+# Bivariate Plots Section
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# bar graph for contribution amount
+ma.contr_by_party
+
+ggplot(aes(x = party, y = sum_party/1000, fill = party), data = ma.contr_by_party) +
+  geom_bar(stat = 'identity') +
+  geom_text(stat = 'identity', aes(label = round(sum_party/1000)),
+            data = ma.contr_by_party, vjust = -0.4) +
+  xlab('Party') +
+  ylab('Contribution Received (Thousands)') +
+  ggtitle('Total Contribution Amount by Party') +
+  scale_fill_manual(values = c('blue', 'red', 'burlywood'))
+
+ggplot(aes(x = party, y = mean_party/1000, fill = party), data = ma.contr_by_party) +
+  geom_bar(stat = 'identity') +
+  geom_text(stat = 'identity', aes(label = round(mean_party/1000)), 
+            data = ma.contr_by_party, vjust = -0.4) +
+  xlab('Party') +
+  ylab('Contribution Received (Thousands)') +
+  ggtitle('Average Contribution Received by Party') +
+  scale_fill_manual(values = c('blue', 'red', 'burlywood'))
+
+sort(by(ma$contb_receipt_amt, ma$cand_nm, sum))
+
+ggplot(aes(x = cand_nm, y = contb_receipt_amt/1000), data = ma) + 
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab('candidate') +
+  ylab('Contribution Amount (Thousands)') +
+  ggtitle('Contribution Amount by Candidate')
+
+sum(ma$contb_receipt_amt)
+
+```
+
+In Massachusetts, the total amount of contributions to the presidential candidates' was $34,335,685 USD. Most of that money went to Hillary Clinton,Bernard Sanders and Donald Trump .
+
+The Democratic party received $29,364,787 USD which is 6.3 times more than the Republican party which received $4,686,844 USD. What is even more surprising is the fact that there were 17 Republican candidates and 5 Democratic candidates meaning that the Democratic candidates received more on average.
+
+Hillary Clinton received the most amount of contributions followed by Bernard Sanders and Donald Trump respectively. 
+
+Massachusetts is a historically blue state and Hillary Clinton has strong political roots there.
+
+Below, boxplots are used to show contribution patterns between candidates and parties.  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+ggplot(aes(x = party, y = contb_receipt_amt, fill = party), data = ma) +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 2700)) +
+  xlab('party') +
+  ylab('Contribution Amount') +
+  ggtitle('Boxplot for Contribution Amount by Party') +
+  scale_fill_manual(values = c('blue', 'burlywood', 'red'))
+```
+
+It is hard to compare the contributions between the parties without scaling the data logarithmically due to the presence of alot of outliers. Below I will apply a log scale and focus my analysis on the Democratic and Republican parties by removing the "others" group.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+ma <- subset(ma, ma$cand_nm != "McMullin, Evan" & ma$cand_nm != "Johnson, Gary" & ma$cand_nm != "Stein, Jill")
+
+by(ma$contb_receipt_amt, ma$party, summary)
+
+ggplot(aes(x = party, y = contb_receipt_amt, fill = party), data = ma) +
+  geom_boxplot() +
+  scale_y_log10() +
+  xlab('party') +
+  ylab('Contribution Amount') +
+  ggtitle('Boxplot for Contribution Amount(Log10) by Party') +
+  scale_fill_manual(values = c('blue', 'red'))
+```
+
+While the Republican party has a higher median and mean contribution amount, the Democratic party has a spread out distribution meaning that they have a range of donors from small to big.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+by(ma$contb_receipt_amt, ma$cand_nm, summary)
+
+ggplot(aes(x = cand_nm, y = contb_receipt_amt), data = ma) + 
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab('candidate') +
+  ylab('Contribution Amount') +
+  ggtitle('Contribution Amount by Candidate')
+
+```
+
+A look at the above visualization shows that Christopher Christie, Lindsey Graham and George Patake have the highest median and Jeb Bush has the greatest IQR(Interquartile range). Hillary Clinton and Bernard Sanders have the lowest median but they also have the most outliers(big donors).
+
+Below, I will look into how the candidates' did in their parties.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Create candidate dataframe and bar graphs for candidates 
+can_group <- group_by(ma, party, cand_nm)
+ma.contr_by_can <- summarize(can_group, 
+                             sum_can = sum(contb_receipt_amt), 
+                             mean_can = mean(contb_receipt_amt),
+                             n = n())
+ma.contr_by_can <- arrange(ma.contr_by_can, sum_can)
+
+ma.contr_by_can
+
+ggplot(aes(x = cand_nm, y = sum_can/1000), data = ma.contr_by_can) +
+  geom_bar(aes(fill = party), stat = 'identity') +
+  scale_y_continuous(limits = c(0, 23000)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab('Candidate') +
+  ylab('Contribution Received (Thousands)') +
+  ggtitle('Contribution Received by Candidate') +
+  scale_fill_manual(values = c("blue", "red"))
+
+# Create candidate_party dataframe
+can_party <- left_join(ma.contr_by_can, ma.contr_by_party, by = 'party')
+
+ggplot(aes(x = cand_nm, y = sum_can/sum_party*100), data = can_party) +
+  geom_bar(aes(fill = party), stat = 'identity') +
+  geom_text(stat='identity', aes(label = paste(round(100*sum_can/sum_party,0),'%')), 
+            size=3, data = can_party, vjust = -0.4)+
+  scale_y_continuous(limits = c(0, 100)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab('Candidate') +
+  ylab('Percentage of Donation') +
+  ggtitle("Percentage of Party's Total Contribution Received by Candidate") +
+  scale_fill_manual(values = c('blue', 'red'))
+
+```
+
+In each party, the majority of the donations were received by only few candidates. Hillary Clinton(81%) and Bernard Sanders(18%) received 99% of the total donations received by the Democratic party. Donald Trump received 41% of the total donations received by the Republican party. Donald Trump, Marco Rubio, Ted Cruz, Jeb Bush, John Kasich all made up 83% of the total donations received by the Republican party. The other 12 Republican candidates accounted for the remaining 17%.
+
+It is clear who the top candidates in each party were in Massachusetts. Below, the analysis will continue to examine the candidates who received at least 9% of the total donations received by their party.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+top_candidate <- c("Clinton, Hillary Rodham", "Sanders, Bernard", "Trump, Donald J.", "Rubio, Marco", "Cruz, Rafael Edward 'Ted'")
+
+top_candidate
+```
+
+
+We noticed that women made up 56% of the contributions. Further questions to be asked are: Do they make up 56% of the contribution amount? Who do they donate to, liberals and/or women candidates?
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+ggplot(aes(x = gender, y = contb_receipt_amt, fill = gender), data = ma) +
+  geom_boxplot() +
+  xlab('gender') +
+  ylab('Contribution Amount') +
+  ggtitle('Boxplot of Contribution Amount by Gender') +
+  coord_cartesian(ylim = c(0, 100))
+
+by(ma$contb_receipt_amt, ma$gender, summary)
+
+```
+
+Men donated $131.1 and women donated $99.78 on average. While women made more donations, their contributed amount is a lot less than men as seen by the significant differences in the median, mean and third quartile. 
+
+```{r echo=FALSE, warning=FALSE, gender_data} 
+# Create gender dataframe
+gender_group <- group_by(ma, gender)
+ma.contr_by_gen <- summarize(gender_group, 
+                             sum_gen = sum(contb_receipt_amt),
+                             n = n())
+ma.contr_by_gen
+
+ggplot(aes(x = gender, y = sum_gen/1000, fill = gender), 
+       data = ma.contr_by_gen) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label = sum_gen/1000), stat = 'identity', data = ma.contr_by_gen, vjust = -0.4) +
+  xlab('Gender') +
+  ylab('Contribution Amount (Thousands)') +
+  ggtitle('Contribution Amount by Gender')
+
+```
+
+The above visualization shows that the total contribution amount by gender is very close. this is due to the fact that even though women donated less on average, they made more donations.
+
+```{r echo=FALSE, ,warning=FALSE, message=FALSE}
+
+# Create gender_to_top_candidate dataframe for bar graph
+ma.gen_to_top_candidate <- ma %>%
+  filter(ma$cand_nm %in% top_candidate) %>%
+  group_by(cand_nm, gender) %>%
+  summarize(sum_gen_can = sum(contb_receipt_amt))
+
+ma.gen_to_top_candidate
+
+ggplot(aes(x = cand_nm, y = sum_gen_can/1000, fill = gender), 
+       data = ma.gen_to_top_candidate) +
+  geom_bar(stat = 'identity', position = position_dodge(width = 1)) +
+  xlab('Candidate') +
+  ylab('Contribution Amount (Thousands)') +
+  ggtitle('Contribution Amount to Top Candidate by Gender') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+In Massachusetts, the women contributed about 15 million USD to the presidential campaign in 2016. Almost 12 million USD was donated to Hillary Clinton and approximately 1.5 million USD was donated to Bernard Sanders. This supports the assumption that in Massachusetts, women donate more to the liberals and/or women candidates.
+
+We saw that retirees make the most contributions, now we will analyze the total contribution amount and average contribution amount across the top 10 occupations.
+ 
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+ma.contr_by_occu
+
+ggplot(aes(x = contbr_occupation, y = sum_occu/1000), data = ma.contr_by_occu) +
+  geom_bar(stat = 'identity') +
+  geom_text(stat = 'identity', aes(label = round(sum_occu/1000)), data = ma.contr_by_occu, vjust = -0.4) +
+  xlab('Top 10 Occupations') +
+  ylab('Total Number of Contributions (Thousands)') +
+  ggtitle('Total Number of Contributions from the Top 10 Occupations') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(aes(x = contbr_occupation, y = round(mean_occu,2)), data = ma.contr_by_occu) + 
+  geom_bar(stat = 'identity') +
+  geom_text(stat = 'identity', aes(label = round(mean_occu,2)), data = ma.contr_by_occu, vjust = -0.4) +
+  xlab('Top 10 Occupations') +
+  ylab('Average Contribution Amount') +
+  ggtitle('Average Contributions from the Top 10 Occupations') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Looking at the above visualizations, the retirees, people who are not employed and attorneys are the top three in terms of number of contributions. The attorneys and homemakers are the top 2 when we look at the average contribution amount. Unemployed people tend to contribute the least on average which is expected. 
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Create top_occupation dataframe 
+top_occu_df <- filter(ma, contbr_occupation %in% ma.contr_by_occu[['contbr_occupation']])
+
+ggplot(aes(x = contbr_occupation, y = contb_receipt_amt), data = top_occu_df) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab('Top 10 Occupations') +
+  ylab('Donation Amount') +
+  ggtitle('Donations Made by Top 10 Occupations')
+```
+
+Above is a boxplot of the contribution amount distribution among the various occupations. It is difficult to analyze because of all the outliers. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+by(top_occu_df$contb_receipt_amt, top_occu_df$contbr_occupation, summary)
+
+ggplot(aes(x = contbr_occupation, y = contb_receipt_amt), data = top_occu_df) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_cartesian(ylim = c(0, 200)) +
+  xlab('Top 10 Occupations') +
+  ylab('Donation Amount') +
+  ggtitle('Donations Made by Top 10 Occupations Excluding Outliers')
+
+```
+
+The above boxplot has excluded outliers and gives a better representation of the data. The median contribution of homemaker, teacher and unemployed are relatively low.  
+
+Attorneys made the largest contributions, some of them donated approximately 4 times their median, they had the most variability and the highest average donation.
+
+# Bivariate Analysis
+
+### Talk about some of the interesting findings you observed in this part of the investigation.
+
+* The Democratic party received most of the total contribution in Massachusetts(86%).
+* There were 5 Democratic candidates and 17 Republican candidates. There is a major disparity when comparing the average amount per candidate between the parties.
+* A few candidates received the majority of contributions in each party.
+* While there are more female donors, men donate more on average.
+* The majority of the contributions from female donors went to the Democratic party and/or woman candidate.
+* Retirees make up most of the total number of contributions, while engineers and software engineers are among the least in total number of contributions.
+* Attorneys had the highest average contribution amount and greatest IQR(Interquartile range), people who are not employed have the lowest average contribution amount and one of the smallest IQR's. 
+
+### Did you observe any interesting relationships between the other features (not the main feature(s) of interest)?
+
+Homemakers had the 2nd highest average contribution amount, but they were among the lowest in terms of median contribution. This suggests that the distribution of the data is skewed right with a lot of outliers. One can also assume that the majority of homemakers are women. 
+
+### What was the strongest relationship you found?
+
+Men donated more than women on average even though there were more women donors.. 
+
+# Multivariate Plots Section
+
+```{r echo=FALSE, warning=FALSE}
+
+ma.top_candidate <- ma %>%
+  filter(cand_nm %in% top_candidate) %>%
+  group_by(cand_nm, contb_receipt_dt) %>%
+  summarize(n = n(), total = sum(contb_receipt_amt))
+
+ggplot(aes(x = contb_receipt_dt, y = total/1000, color = cand_nm), data = ma.top_candidate) +
+  geom_jitter(alpha = 0.05) +
+  geom_smooth(method = 'loess') +
+  xlab('Date') +
+  ylab('Contribution Amount (Thousands)') +
+  ggtitle('Time Series of Contribution Amount by Candidate')
+
+ggplot(aes(x = contb_receipt_dt, y = n, color = cand_nm), data = ma.top_candidate) +
+  geom_jitter(alpha = 0.05) +
+  geom_smooth(method = 'loess') +
+  xlab('Date') +
+  ylab('Number of Contributions') +
+  ggtitle('Time Series of Number of Contributions by Candidate')
+
+```
+
+Hillary Clinton raised the most money and had the most donors in Massachusetts. This wasn't always the case throughout the campaign process. The above two visualizations show that:
+
+* Bernard Sanders raised more money than Hillary Clinton from January 2016 to about March 2016.
+* Bernard Sanders had more donors than Hillary Clinton from December 2015 to about June 2016 which is around the time he announced that he will be endorsing Hillary Clinton. 
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+ggplot(aes(x = contb_receipt_dt, y = total, color = cand_nm), data = ma.top_candidate) +
+  geom_jitter(alpha = 0.05) +
+  geom_smooth(method = 'loess') +
+  xlab('Date') +
+  ylab('Contribution Amount') +
+  ggtitle('Time Series of Contribution Amount(Log10) by Candidate') +
+  facet_wrap(~ cand_nm) +
+  scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 70, hjust = 1))
+
+```
+
+Above is the time series trend for the top candidates, Hillary Clinton had steady growth in contribution amount, so did Bernard Sanders until he dropped out to endorse Hillary Clinton. Ted Cruz had a slow and consistent growth in contribution amount which ended when he suspended his campaign in May 2016. Donald Trump's contribution amount had a steady growth from March 2016 until around September 2016. He was quoted as saying that he wanted to compete in Massachusetts which is a predominatly Democratic state, he even set up a Massachusetts Headquarters. 
+
+
+Where in Massachusetts do the contributors reside? 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, data_map}
+# Create a new dataframe for map
+lat <- ma$latitude
+lon <- ma$longitude
+party <- ma$party
+ma_map <- data.frame(party, lat, lon)
+colnames(ma_map) <- c('party', 'lat', 'lon')
+
+# make_bbox function to get a zoom level
+sbbox <- make_bbox(lon = ma$lon, lat = ma$lat, f = 0.01)
+
+my_map <- get_map(location = sbbox, maptype = "roadmap", scale = 2, color="bw", zoom = 7)
+
+ggmap(my_map) +
+  geom_point(data=ma_map, aes(x = lon, y = lat, color = party), 
+             size = 2, alpha = 0.2) +
+  xlab('Longitude') +
+  ylab('Latitude') +
+  ggtitle('Location of Donors') +
+  scale_y_continuous(limits = c(41, 43)) +
+  scale_x_continuous(limits = c(-74, -70)) +
+  scale_color_manual(breaks=c("democrat", "republican"), values=c("blue","red"))
+
+```
+
+As stated above, Massachusetts is a historically Democratic state. Most of the Republican supporters seem to be concentrated around Boston which is the largest city in Massachusetts. 
+
+# Predictive Modeling
+
+Below, I will apply a logistic regression model to the data in order to predict the contributing party of a donor using their gender, donation amount and location(latitude, longitude). The steps to be taken are as follows:
+
+* Create a subset of the orginal dataset by selecting the columns that are pertinent to the analysis and filtering out the 'other' group.  
+* Clean and format data.
+* Use the absolute value of longitude for calculations. 
+* Create a model to predict the contributing party of a donor based on gender, contribution receipt amount and location. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, predictive_model}
+# Clean and format data
+data <- subset(ma,select=c(10, 19, 21, 25, 26))
+data <- filter(data, party %in% c('democrat', 'republican'))
+data$party <- as.factor(data$party)
+data$gender <- as.factor(data$gender)
+# Use absolute longitude
+data$longitude <- abs(data$longitude)
+# Split data into two chunks
+train <- data[1:240000,]
+test <- data[240001:267914,]
+# fit the model
+model <- glm(party ~.,family=binomial(link='logit'),data=train)
+summary(model)
+
+```
+
+### Interpretation of the Results of the Logistic Regression Model
+
+* The log odds of contributing to the Republican party decreases by 0.75 for a one unit increase in latitude.
+* The log odds of contributing to the Republican party decreases by 0.09 for a one unit increase in abs(longitude).
+* The log odds of contributing to the Republican party increase by 0.0004 for a one unit increase in contribution amount.  
+* If all other variables are kept constant, the male donor is more likely to contribute to the Republican party. 
+
+### Assessing the Accuracy of the Predictive Model
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, model_fitting}
+
+# Execute prediction of the test data
+model_pred_prob <- predict(model, test, type='response')
+# Change probability to class of direction
+model_pred_direction <- rep('democrat', nrow(test))
+# Set decision boundry 0.5
+model_pred_direction[model_pred_prob > 0.5] = 'republican'
+# Create confusion matrix
+table(model_pred_direction, test$party)
+# Compute and print accuracy
+misClasificError <- mean(model_pred_direction != test$party)
+print(paste('Accuracy',1-misClasificError))
+
+```
+
+An accuracy of 0.94 on the test set is a very good result but it may not be precise enough as the result is based on the manual split of the data. 
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. 
+
+* The contribution amount Hillary Clinton received increased closer to the election. The donors who contributed large sums seemed to support her.
+* Donald Trump received less donations closer to the election.
+
+### Were there any interesting or surprising findings?
+
+For a while, it seemed as though Bernard Sanders was more popular than Hillary Clinton because he received more donations.
+
+## Final Plots  
+
+### A Few Candidates Received Most of the Donations.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+can_party$cand_nm <- ordered(can_party$cand_nm, levels = c("Clinton, Hillary Rodham", "Sanders, Bernard" , "O'Malley, Martin Joseph", "Lessig, Lawrence", "Trump, Donald J.", "Rubio, Marco", "Cruz, Rafael Edward 'Ted'", "Kasich, John R.", "Bush, Jeb", "Carson, Benjamin S.", "Christie, Christopher J.", "Graham, Lindsey O.", "Fiorina, Carly", "Paul, Rand", "Walker, Scott", "Huckabee, Mike", "Santorum, Richard J.", "Pataki, George E.", "Gilmore, James S III", "Perry, James R. (Rick)", "Jindal, Bobby", "Webb, James Henry Jr."))
+
+ggplot(aes(x = cand_nm, y = sum_can/sum_party*100), data = can_party) +
+  geom_bar(aes(fill = party), stat = 'identity') +
+  geom_text(stat='identity', aes(label = paste(round(100*sum_can/sum_party,0),'%')), 
+            size=3, data = can_party, vjust = -0.4)+
+  scale_y_continuous(limits = c(0, 100)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab('Candidate') +
+  ylab('Percentage of Donation') +
+  ggtitle("Percentage of Party's Total Contribution Received by Candidate") +
+  scale_fill_manual(values = c("blue", 'red'))
+```
+
+The financial contributions to the presidential campaign in Massachusetts were distributed unevenly. In the Democratic party, 99% of the contributions went to Hillary Clinton(81%) and Bernard Sanders(18%). Massachusetts is a historically Democratic state and Hillary Clinton also has strong political ties there. 
+
+### Contribution by Occupation
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+ggplot(aes(x = contbr_occupation, y = sum_occu/1000), data = ma.contr_by_occu) +
+  geom_bar(stat = 'identity') +
+  geom_text(stat = 'identity', aes(label = round(sum_occu/1000)), data = ma.contr_by_occu, vjust = -0.4) +
+  xlab('Top 10 Occupations') +
+  ylab('Total Contribution Amount (Thousands)') +
+  ggtitle('Total Contribution Amount from the Top 10 Occupations') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+There is a lot of disparity in the total contribution across occupations. One would assume that attorneys and engineers would be the major contributors but it tunrned out that retirees contributed the most money to the 2016 Presidential campaign in Massachusetts. 
+
+It is surprising that software engineers and engineers contributed the least amount to the 2016 Presidential campaign especially since they more than likely make an above average salary. To gain further insight, one would have to know the political background of the industry. 
+
+### Time Series of Top Candidates
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+p1 <- ggplot(aes(x = contb_receipt_dt, y = total, color = cand_nm), 
+             data = ma.top_candidate) +
+  geom_jitter(alpha = 0.05) +
+  geom_smooth(method = 'loess') +
+  scale_y_log10() +
+  xlab('Date') +
+  ylab('Contribution Amount') +
+  ggtitle('Time Series of Contribution Amount(Log10) by Candidate')
+
+p2 <- ggplot(aes(x = contb_receipt_dt, y = n, color = cand_nm), 
+             data = ma.top_candidate) +
+  geom_jitter(alpha = 0.05) +
+  geom_smooth(method = 'loess') +
+  scale_y_log10() +
+  xlab('Date') +
+  ylab('Number of Contributions') +
+  ggtitle('Time Series of Number of Contributions(Log10) by Candidate')
+
+grid.arrange(p1, p2, ncol = 1)
+
+```
+
+Hillary Clinton was way ahead of the other candidates in the number of contributions and contribution amount received towards the election. 
+
+Bernard Sanders was on par with Hillary Clinton in the contribution amount received and ahead in the number of contributions received until he pulled out and decided to endorse her. 
+
+## Reflection
+
+### Challenges
+
+The downloaded dataset for the 2016 Presidential campaign for the state of Massachusetts from April 2015 to November 2016 contained 295667 donations. The challenges that I encountered during the analysis are listed below:
+
+* In the dataset, there were several negative contributions and contributions that were over the $2700 contribution limit set by the FEC. I attributed the negative contributions to refunds and redesignation of funds. As a result, I removed the contributions that were negative and above $2700 from the dataset. 
+* I had to add a gender column to the dataset so that I could analyze the relationship between gender and contributions. R's gender package was used because it encodes gender based on names and dates of birth using historical dataets which make it able to report the probability that a name was male or female.   
+* In order to accurately represent a donor's geographic location, I had to add latitude and longitude columns to the dataset by using the latitude and longitude information for U.S. ZIP codes from the zipcode package. I then used ggmap to visualize spatial data on top of a static Google Map of Massachusetts.
+* I used a logistic regression model to try to predict a donor's contributing party based their gender, donation amount and location(latitude, longitude). 
+
+These were all challenges due to the fact that I had to either change the data or utilize packages and models that were new to me.
+
+### Successes
+
+* The success of this project was due to the many packages that R offers and the statistical comptuations that can be done in R. Some important packages were the dplyr, gender, ggmap, ggplot2 and zipcode packages.  
+* The project was a success due to the interesting findings that were revealed as a result of an in depth analysis of the datset. 
+
+### Conclusion
+
+The analysis of the financial contributions to the 2016 Presidential campaign for the state of Massachusetts provided some interesting revelations. 
+* Most of the donations were to a few candidates.
+* Massachusetts is mostly a Democratic state. 
+* Females seem to donate to liberals and/or a female candidate.
+* The retirees are the group that made the most number of contributions. 
+* The engineers and software engineers make the least number of contributions and are in the bottom 4 of the top 10 occupations in average contribution amount despite having above average salaries. 
+* Bernard Sanders was more popular than Hillary Clinton until he dropped out of the Presidential campaign.
+
+### Future Work
+
+This analysis was for the state of Massachusetts, analysis of swing states like Florida, Nevada, North Carolina or even analysis of the whole U.S. would provide some very different and interesting insights. 
+
+There was a Post-Election surge in contributions to groups that pledge to fight Donald Trumps's proposed policies. I think that this will be another dataset that might pique interest. 
+
+
