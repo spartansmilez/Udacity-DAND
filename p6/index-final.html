@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>	
+	<title>Visualization of Titanic Dataset</title>
+	<meta charset = "utf-8">
+	<style type="text/css">
+	    h1 {
+            font-family: Courier;
+            font-style: italic;
+        }
+        h2 {
+            font-family: Courier;
+            font-style: italic;
+        }
+		.Survived {
+			fill : #FF6600;
+		}
+		.Died {
+			fill : #00F;
+		}
+	  	.y_axes path{
+	  		display : none;
+		}  
+		path{
+			fill: none;
+			stroke: #000;
+		}
+		svg{
+			display: block;
+			margin: 0 auto;
+		}
+		.chart_title{
+			text-align: center;
+		}
+		.d3-tip {
+			line-height: 1;
+			font-weight: bold;
+			padding: 12px;
+			background: rgba(0, 0, 0, 0.85);
+			color: #fff;
+			border-radius: 2px;
+		}
+		rect:hover{
+			opacity: 1;
+		}
+		.instruction{
+			width: 50vw;
+			display: block;
+			margin: 0 auto;
+		}
+	</style>
+	<script src="http://d3js.org/d3.v3.min.js"></script>
+	<script src="http://labratrevenge.com/d3-tip/javascripts/d3.tip.v0.6.3.js"></script>
+	<script type="text/javascript">
+
+		// Set up SVG. 		
+	    var margin = 50, width = 1080, height = 200, x_axis_space = 100;
+	    var rect_side = 10;
+
+	    /*
+			Function to split the dataset into two subsets of the gender of the passenger.
+	    	@param: Data file and the desired gender for the subset.
+			@return: A smaller dataset.
+	    */
+	    function filter_data(data, sex){
+	    	var filtered_data = data.filter(function(d) {
+            	return d.Sex === sex;
+	    	});
+	    	return filtered_data;
+		}
+
+		/*
+			Function for drawing the visualization
+			@param: data file.
+		*/
+		function draw(data){
+			// Subset of the dataset based on gender.
+			var male_data = filter_data(data, "male");
+			var female_data = filter_data(data, "female");
+
+			// Set up SVGs and append circles.
+		    d3.select("div.chart")
+		    	.append("svg")
+		    		.attr("width", width)
+		    		.attr("height", height/2)
+		    		.attr("class", "male")
+		     	.selectAll("rect")
+		    	.data(male_data)
+		    	.enter()
+		    	.append("rect");
+
+		    d3.select("div.chart")
+		    	.append("svg")
+		    		.attr("width", width)
+		    		.attr("height", height/2 + x_axis_space)
+		    		.attr("class", "female")
+		    	.selectAll("rect")
+		    	.data(female_data)
+		    	.enter()
+		    	.append("rect");
+
+		   	// Build extents. 
+		    var age_extent = d3.extent(data, function(d){
+		    	return d.Age;
+		    });
+		    var pclass_extent = d3.extent(data, function(d){
+		    	return d.Pclass;
+		    });
+
+		    // Build scales.
+		    var x_scale = d3.scale.linear()
+		    	.range([2.5*margin, width - 2.5*margin])
+		    	.domain(age_extent);
+		    var y_scale = d3.scale.linear()
+		    	.range([rect_side + 10, height/2-margin/2])
+		    	.domain(pclass_extent);
+
+		    // Build axes.
+		    var x_axis = d3.svg.axis().scale(x_scale);
+		    var y_axis = d3.svg.axis().scale(y_scale).orient("left").ticks(2);
+
+		    // Set the positions and the radius of the points.
+		    d3.selectAll("rect")
+		    	.attr("x", function(d){return x_scale(d.Age) - rect_side/2;})
+		    	.attr("y", function(d){return y_scale(d.Pclass) - rect_side/2;})
+		    	.attr("width",rect_side)
+		    	.attr("height",rect_side)
+		    	.attr("opacity", 0.2)
+		    	.attr("class", function(d){
+		    		if (d.Survived == 1) return "Survived points";
+		    		else return "Died points"});
+
+		    // Add the labels and legends for the axes.
+		    d3.selectAll("svg.female")
+		    	.append("g")
+		    		.attr("class", "x_axis")
+		    		.attr("transform", "translate(0, " + (height/2) + ")")
+		    		.call(x_axis);
+
+		    d3.selectAll("svg")
+		    	.append("g")
+		    		.attr("transform", "translate(" + (2.5*margin) + ",0)")
+		    		.attr("class", "y_axes")
+		    		.call(y_axis);
+		   
+		    d3.selectAll("svg")
+		    	.append("g")
+		    		.attr("class", "y_axis_title")
+		    		.attr("transform", "translate(" + (2*margin - rect_side) + "," + height/4 +")")
+		    		.append("text")
+		    			.attr("text-anchor","middle")
+		    			.style("font-family", "Courier")
+		    			.text("PClass")
+		    			.attr("transform", "rotate(270,0,0)");
+
+		    d3.select("svg.female")
+		    	.select("g.y_axes")
+		    	.append("text")
+		    		.attr("text-anchor", "left")
+		    		.style("font-family", "Courier")
+		    		.text("Female")
+		    		.attr("transform", "translate(" + (-2.4*margin) + "," + height/4 + ")");
+
+		    d3.select("svg.male")
+		    	.select("g.y_axes")
+		    	.append("text")
+		    		.attr("text-anchor", "left")
+		    		.style("font-family", "Courier")
+		    		.text("Male")
+		    		.attr("transform", "translate(" + (-2.4*margin) + "," + height/4 + ")");
+
+		    d3.select("svg.female")
+		    	.select("g.x_axis")
+		    	.append("text")
+		    		.attr("text-anchor", "middle")
+		    		.style("font-family", "Courier")
+		    		.text("Age")
+		    		.attr("transform", "translate(" + width/2 + "," + margin + ")");
+
+		    d3.select("svg.male")
+		    	.append("g")
+		    		.attr("transform", "translate(" + (width - margin) + "," + height/5 + ")")
+		    		.attr("class", "survive_legend")
+		    		.append("rect")
+		    			.attr("class", "Survived")
+		    			.attr("width",rect_side)
+		    			.attr("height",rect_side)
+		    			.attr("opacity", 1);
+
+		    d3.select("g.survive_legend")
+		    	.append("text")
+		    		.attr("text-anchor", "middle")
+		    		.style("font-family", "Courier")
+		    		.text("Survived")
+		    		.attr("transform", "translate(" + rect_side/2 + "," + rect_side*2.5 + ")");
+
+		    d3.select("svg.female")
+		    	.append("g")
+		    		.attr("transform", "translate(" + (width - margin) + "," + height/5 + ")")
+		    		.attr("class", "die_legend")
+		    		.append("rect")
+		    			.attr("class", "Died")
+		    			.attr("width",rect_side)
+		    			.attr("height",rect_side)
+		    			.attr("opacity", 1);
+
+		    d3.select("g.die_legend")
+		    	.append("text")
+		    		.attr("text-anchor", "middle")
+		    		.style("font-family", "Courier")
+		    		.text("Died")
+		    		.attr("transform", "translate(" + rect_side/2 + "," + rect_side*2.5 + ")");
+
+		    // Set up tool tip information.
+		    var tip = d3.tip()
+				.attr('class', 'd3-tip')
+				.offset([-10, 0])
+				.html(function(d) {
+			    	return "<strong>Gender:</strong> <span style='color:bisque'>" + d.Sex + "</span>" + " "
+			    	 + "<strong>Class:</strong> <span style='color:bisque'>" + d.Pclass + "</span>" + " "
+			    	 + "<strong>Age:</strong> <span style='color:bisque'>" + d.Age + "</span>" + " " 
+			    	 + "<br/>" 
+			    	 + "<strong>Survival Rate:</strong> <span style='color:lightsalmon'>" + d.surviveRate + "%" +  "</span>" + " "
+			    	 + "<strong>Number of People:</strong> <span style='color:lightsalmon'>" + d.numTotal + "</span>";
+			});
+
+			// Set up mouse over tool tip info.
+  			d3.selectAll("svg").call(tip);
+		    d3.selectAll("rect.points")
+		    	.on("mouseover", tip.show)
+		    	.on("mouseout", tip.hide);
+
+		    // Separation line.
+		    d3.select("svg.male")
+		    	.append("line")
+		    		.attr("x1", ""+0)
+		    		.attr("y1", ""+(height/2-1))
+		    		.attr("x2", ""+width)
+		    		.attr("y2", ""+(height/2-1))
+		    		.attr("stroke", "black")
+		    		.attr("opacity", 0.5);
+	    }
+	</script>
+		
+</head>
+<body>
+	<h1 class = "chart_title">Titanic Passengers: Survive or Did Not Survive</h1>
+	<h2 class = "chart_title">Based on Age, Gender and Class</h2>
+	<div class = "instruction">
+	<details>
+		<summary>Tips on reading the Graph!</summary>
+		<p>
+		The dataset that was used comes from <a href="https://www.kaggle.com/c/titanic" target="_blank"><i>Titanic: Machine Learning from Disaster</i></a>. It's part of Kaggle's prediction competitions that utilize the basics of machine learning.
+		The goal is to predict survival on the Titanic, you are provided with information on an individual's age, gender, socio-economic status(class) and other features.</p>
+		<ul>
+			<li>On the graph, each rectangle represents a passenger on the Titanic with the color red meaning that the passenger survived and the color blue indicating that they did not survive.</li>
+			<li>To account for the fact that several people can belong to the same class, be the same age and gender, I set the opacity(how transparent an element is) of the rectangles to 20%. The passengers that have a solid red were the predicted survivors and the solid blue indicates that they probably didn't survive based on the characteristics that they were grouped by.</li>
+			<li>Moving the mouse over the rectangles shows a deatiled summary of the survival rates.</li>
+		</ul>
+		<p>Based on these visualization you will observe that:</p>
+		<ol>
+			<li>Females and young males(under age:15) from the middle(PClass 2) and upper classes(PClass 1) tend to survive.</li>
+			<li>The overall survival rate for female passengers is higher than male passengers.</li>
+		</ol>
+	</details>
+	</div>
+	<div class = "chart"></div>
+	<script type="text/javascript">
+	// Load data and drawing.
+    d3.csv("pdata.csv", function(d) {
+    	// Convert numeric columns into javascript numbers.
+    	d["PassengerId"] = +d["PassengerId"];
+    	d["Survived"] =	+d["Survived"];
+    	d["Pclass"] = +d["Pclass"];
+    	d["Age"] = +d["Age"];
+    	d["SibSp"] = +d["SibSp"];
+    	d["Parch"] = +d["Parch"];
+    	d["Fare"] = +d["Fare"];
+    	return d;
+    	},draw);
+    </script>
+</body>
+</html>
