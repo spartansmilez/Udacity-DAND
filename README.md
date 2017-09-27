@@ -23,4 +23,4 @@ This repository contains project work for Udacity's [Data Analyst Nanodegree](ht
 * Intro to Machine Learning
 * Data Visualization with D3
 
-![Udacity Data Analyst Nanodegree Certificate](Nanodegree Certificate.pdf)
+[Udacity Data Analyst Nanodegree Certificate](Nanodegree Certificate.pdf)
